@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body {
+      font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+      background: #f4f5f7;
+      margin: 0;
+      padding: 16px;
+      color: #222;
+    }
+    header {
+      margin-bottom: 20px;
+    }
+    header h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+    }
+    #userInfo {
+      font-size: 13px;
+      color: #555;
+    }
+    section {
+      background: #fff;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    section h2 {
+      font-size: 15px;
+      margin: 0 0 10px;
+      border-left: 4px solid #4a7dff;
+      padding-left: 8px;
+    }
+    #unreadSection h2 {
+      border-left-color: #e2483d;
+      color: #c0392b;
+    }
+    .card {
+      border: 1px solid #e2e4e8;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      background: #fafbfc;
+    }
+    .card.unread {
+      background: #fff5f5;
+      border-color: #f3b4b0;
+    }
+    .card.read {
+      opacity: 0.7;
+    }
+    .card .meta {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 6px;
+    }
+    .card .content {
+      font-size: 14px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    .card button {
+      margin-top: 8px;
+      background: #4a7dff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-left: 6px;
+      color: #fff;
+    }
+    .badge.high { background: #e2483d; }
+    .badge.mid { background: #e8a33d; }
+    .badge.low { background: #8a9099; }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 70px;
+      padding: 8px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-family: inherit;
+    }
+    select {
+      margin-bottom: 8px;
+      padding: 4px;
+    }
+    #formSection button {
+      background: #2e9e5b;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .readstatus {
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .readstatus.unread-names {
+      color: #c0392b;
+    }
+    #adminList h3 {
+      font-size: 14px;
+      margin: 14px 0 6px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 4px;
+    }
+    .empty {
+      color: #888;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>引き継ぎノート</h1>
+      <div id="userInfo">読み込み中...</div>
+      <div id="buildingSwitcher" style="display:none; margin-top:6px;">
+        表示中の建物:
+        <select id="buildingSelect" onchange="onBuildingChange()"></select>
+      </div>
+    </header>
+
+    <section id="unreadSection">
+      <h2>⚠️ 未読の引き継ぎ</h2>
+      <div id="unreadList" class="empty">読み込み中...</div>
+    </section>
+
+    <section id="formSection">
+      <h2>新しい引き継ぎを入力</h2>
+      <div>
+        重要度:
+        <select id="importance">
+          <option value="低">低</option>
+          <option value="中" selected>中</option>
+          <option value="高">高</option>
+        </select>
+      </div>
+      <textarea id="content" placeholder="引き継ぎ内容を入力してください"></textarea>
+      <button onclick="submitHandover()">登録する</button>
+    </section>
+
+    <section id="historySection">
+      <h2>引き継ぎ履歴（直近30件）</h2>
+      <div id="historyList" class="empty">読み込み中...</div>
+    </section>
+
+    <section id="adminSection" style="display:none">
+      <h2>管理者ビュー（直近14日）</h2>
+      <div id="adminList" class="empty">読み込み中...</div>
+    </section>
+  </div>
+
+  <script>
+    let currentBuilding = null;
+
+    function init() {
+      google.script.run.withSuccessHandler(onUser).withFailureHandler(onError).getCurrentUser();
+    }
+
+    function onUser(user) {
+      document.getElementById('userInfo').innerText =
+        user.name + ' さん' + (user.isAdmin ? ' [管理者]' : '');
+
+      currentBuilding = user.defaultBuilding;
+
+      if (user.buildings.length > 1) {
+        const switcher = document.getElementById('buildingSwitcher');
+        const select = document.getElementById('buildingSelect');
+        select.innerHTML = user.buildings.map(function (b) {
+          return '<option value="' + b + '"' + (b === currentBuilding ? ' selected' : '') + '>' + b + '</option>';
+        }).join('');
+        switcher.style.display = 'block';
+      } else {
+        document.getElementById('buildingSwitcher').style.display = 'none';
+      }
+
+      if (user.isAdmin) {
+        document.getElementById('adminSection').style.display = 'block';
+        loadAdmin();
+      }
+      loadUnread();
+      loadHistory();
+    }
+
+    function onBuildingChange() {
+      currentBuilding = document.getElementById('buildingSelect').value;
+      loadUnread();
+      loadHistory();
+    }
+
+    function onError(err) {
+      document.getElementById('userInfo').innerText = 'エラー: ' + err.message;
+      document.getElementById('unreadList').innerText = '';
+      document.getElementById('historyList').innerText = '';
+    }
+
+    function badgeClass(importance) {
+      return importance === '高' ? 'high' : importance === '中' ? 'mid' : 'low';
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, function (s) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[s];
+      });
+    }
+
+    function loadUnread() {
+      google.script.run.withSuccessHandler(renderUnread).withFailureHandler(onError).getUnreadHandovers(currentBuilding);
+    }
+
+    function renderUnread(list) {
+      const el = document.getElementById('unreadList');
+      if (!list || list.length === 0) {
+        el.className = 'empty';
+        el.innerHTML = '未読の引き継ぎはありません。';
+        return;
+      }
+      el.className = '';
+      el.innerHTML = list.map(function (item) {
+        return (
+          '<div class="card unread">' +
+          '<div class="meta">' + item['登録日時'] + ' / ' + item['記入者名'] +
+          '<span class="badge ' + badgeClass(item['重要度']) + '">' + item['重要度'] + '</span></div>' +
+          '<div class="content">' + escapeHtml(item['内容']) + '</div>' +
+          '<button onclick="markRead(\'' + item.ID + '\')">確認しました</button>' +
+          '</div>'
+        );
+      }).join('');
+    }
+
+    function markRead(id) {
+      google.script.run.withSuccessHandler(function () {
+        loadUnread();
+        loadHistory();
+      }).withFailureHandler(onError).markAsRead(id);
+    }
+
+    function submitHandover() {
+      const content = document.getElementById('content').value.trim();
+      const importance = document.getElementById('importance').value;
+      if (!content) { alert('内容を入力してください'); return; }
+      google.script.run.withSuccessHandler(function () {
+        document.getElementById('content').value = '';
+        loadHistory();
+        loadUnread();
+      }).withFailureHandler(onError).addHandover(currentBuilding, content, importance);
+    }
+
+    function loadHistory() {
+      google.script.run.withSuccessHandler(renderHistory).withFailureHandler(onError).getRecentHandovers(currentBuilding);
+    }
+
+    function renderHistory(list) {
+      const el = document.getElementById('historyList');
+      if (!list || list.length === 0) {
+        el.className = 'empty';
+        el.innerHTML = '記録はまだありません。';
+        return;
+      }
+      el.className = '';
+      el.innerHTML = list.map(function (item) {
+        return (
+          '<div class="card' + (item.isRead ? ' read' : '') + '">' +
+          '<div class="meta">' + item['登録日時'] + ' / ' + item['記入者名'] +
+          '<span class="badge ' + badgeClass(item['重要度']) + '">' + item['重要度'] + '</span>' +
+          (item.isRead ? ' ✅既読' : '') + '</div>' +
+          '<div class="content">' + escapeHtml(item['内容']) + '</div>' +
+          '</div>'
+        );
+      }).join('');
+    }
+
+    function loadAdmin() {
+      google.script.run.withSuccessHandler(renderAdmin).withFailureHandler(onError).getAdminOverview();
+    }
+
+    function renderAdmin(data) {
+      const el = document.getElementById('adminList');
+      if (!data || data.length === 0) {
+        el.className = 'empty';
+        el.innerHTML = '建物マスタにデータがありません。';
+        return;
+      }
+      el.className = '';
+      el.innerHTML = data.map(function (b) {
+        const entriesHtml = b.entries.length === 0
+          ? '<p class="empty">直近14日の記録はありません</p>'
+          : b.entries.map(function (e) {
+              return (
+                '<div class="card">' +
+                '<div class="meta">' + e.date + ' / ' + e.author +
+                '<span class="badge ' + badgeClass(e.importance) + '">' + e.importance + '</span></div>' +
+                '<div class="content">' + escapeHtml(e.content) + '</div>' +
+                '<div class="readstatus">既読: ' + (e.readers.join('、') || 'なし') + '</div>' +
+                '<div class="readstatus unread-names">未読: ' + (e.unreaders.join('、') || 'なし') + '</div>' +
+                '</div>'
+              );
+            }).join('');
+        return '<h3>' + b.building + '</h3>' + entriesHtml;
+      }).join('');
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
